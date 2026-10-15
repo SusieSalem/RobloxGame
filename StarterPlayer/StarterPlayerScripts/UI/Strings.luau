@@ -26,6 +26,8 @@ local STRINGS = {
 		SettingLegIK = "Pasos con IK",
 		SettingHints = "Mostrar controles",
 		Close = "Cerrar",
+		Updates = "Actualizaciones",
+		LatestUpdate = "Nuevo: %s (U para ver más)",
 	},
 	en = {
 		Move = "Move",
@@ -49,6 +51,8 @@ local STRINGS = {
 		SettingLegIK = "IK footsteps",
 		SettingHints = "Show controls",
 		Close = "Close",
+		Updates = "Updates",
+		LatestUpdate = "New: %s (U for more)",
 	},
 }
 

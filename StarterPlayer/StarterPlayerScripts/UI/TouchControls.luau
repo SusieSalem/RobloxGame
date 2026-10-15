@@ -25,7 +25,7 @@ local function styleButton(button: GuiButton, round: boolean)
 	button.AnchorPoint = Vector2.new(0.5, 0.5)
 	Components.corner(if round then UDim.new(1, 0) else UDim.new(0.5, 0)).Parent = button
 	local stroke = Components.stroke()
-	stroke.Thickness = 2
+	stroke.Thickness = Theme.StrokeThickness + 1
 	stroke.Parent = button
 	return stroke
 end

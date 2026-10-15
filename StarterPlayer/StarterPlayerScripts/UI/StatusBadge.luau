@@ -74,6 +74,7 @@ function StatusBadge.mount(parent: Instance)
 		Name = "StatusBadge",
 		AnchorPoint = Vector2.new(0.5, 0),
 		Position = UDim2.new(0.5, 0, 0, 10),
+		Rotation = -2, -- slightly crooked, like a sticker
 		Visible = false,
 		Parent = parent,
 	}, {

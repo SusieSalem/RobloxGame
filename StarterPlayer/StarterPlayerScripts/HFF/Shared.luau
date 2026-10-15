@@ -8,7 +8,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Signal = require(script.Parent.Signal)
 
 local Config = require(ReplicatedStorage:WaitForChild("HFFMovementConfig"))
-if Config.Version ~= 2 then
+if Config.Version ~= 22 then
 	warn("[HFF] HFFMovementConfig is out of date; sync ReplicatedStorage/HFFMovementConfig.luau again")
 end
 

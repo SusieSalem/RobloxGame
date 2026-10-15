@@ -25,7 +25,17 @@ function Util.getCameraYaw(): number
 	if not camera then
 		return 0
 	end
-	return Util.yawFromDirection(camera.CFrame.LookVector)
+	-- Looking almost straight up or down, the flat part of the look direction
+	-- is tiny and jumps around, which used to make the body shake. The camera's
+	-- up vector then points along the same horizontal direction (backward when
+	-- looking up, forward when looking down), so add it in to keep the yaw steady.
+	local cframe = camera.CFrame
+	local look, up = cframe.LookVector, cframe.UpVector
+	local flat = Vector3.new(look.X, 0, look.Z) - Vector3.new(up.X, 0, up.Z) * math.sign(look.Y)
+	if flat.Magnitude < 1e-4 then
+		flat = Vector3.new(look.X, 0, look.Z)
+	end
+	return Util.yawFromDirection(flat)
 end
 
 -- Smooth random value in [-1, 1].

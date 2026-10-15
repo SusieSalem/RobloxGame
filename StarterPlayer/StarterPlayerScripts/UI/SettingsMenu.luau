@@ -59,7 +59,7 @@ function SettingsMenu.mount(parent: Instance)
 		BackgroundColor3 = Theme.Colors.Accent,
 		Size = UDim2.new(1, 0, 0, 40),
 		LayoutOrder = 3,
-	}, { Components.corner(UDim.new(0, 10)) })
+	}, { Components.corner(UDim.new(0, 12)), Components.stroke() })
 
 	local card = Components.panel({
 		Name = "Settings",

@@ -16,6 +16,53 @@ function Knockdown.knockDown(rigState, duration: number?)
 	rigState.stateTime = 0
 	rigState.knockDuration = duration or Config.KnockdownTime
 	rigState.tiltTimer = 0
+	-- The hit itself: every muscle lets go for a moment before the reflexes
+	-- (bracing, flailing) kick in. This is what sells the weight of a fall.
+	rigState.limpUntil = os.clock() + Config.ImpactLimpTime
+end
+
+-- Start (or add to) a stumble that tips the body along direction by angle
+-- radians. The feet then take catch-steps toward the tip.
+function Knockdown.stagger(rigState, direction: Vector3, angle: number)
+	if not Config.EuphoriaEnabled or (rigState.state ~= "Active" and rigState.state ~= "Stagger") then
+		return
+	end
+	local flat = Vector3.new(direction.X, 0, direction.Z)
+	if flat.Magnitude < 1e-3 then
+		local random = math.random() * math.pi * 2
+		flat = Vector3.new(math.cos(random), 0, math.sin(random))
+	end
+	if rigState.state == "Stagger" then
+		rigState.teeterDrift += flat.Unit * angle
+	else
+		rigState.state = "Stagger"
+		rigState.stateTime = 0
+		rigState.teeterManual = false
+		rigState.teeterDrift = flat.Unit * angle
+	end
+end
+
+-- Real balance loss: when something shoves or trips the body so far from
+-- where the balance wants it that the muscles can't hold it, start stumbling
+-- the way it was pushed instead of snapping back upright.
+function Knockdown.checkBalanceLoss(rigState, dt: number, now: number, targetUp: Vector3, grounded: boolean)
+	-- (Skipped just after getting up or catching a stumble, while the torso is still settling.)
+	if rigState.state ~= "Active" or not grounded or now < rigState.graceUntil or rigState.stateTime < 0.5 then
+		rigState.balanceLossTimer = 0
+		return
+	end
+	local up = rigState.root.CFrame.UpVector
+	local offBy = math.acos(math.clamp(up:Dot(targetUp), -1, 1))
+	if offBy > math.rad(Config.BalanceLossAngle) then
+		rigState.balanceLossTimer = (rigState.balanceLossTimer or 0) + dt
+		if rigState.balanceLossTimer > Config.BalanceLossTime then
+			rigState.balanceLossTimer = 0
+			local angle = math.min(offBy * Config.BalanceLossCarry, math.rad(Config.TeeterFallAngle) * 0.7)
+			Knockdown.stagger(rigState, up - targetUp, angle)
+		end
+	else
+		rigState.balanceLossTimer = math.max((rigState.balanceLossTimer or 0) - dt, 0)
+	end
 end
 
 -- Manual ragdoll toggle (R / gamepad Y / mobile button): you lose balance and
@@ -56,6 +103,10 @@ function Knockdown.update(rigState, dt: number, now: number)
 	end
 
 	if rigState.state == "Knocked" then
+		-- Slamming into the ground or a wall while down knocks the wind out again.
+		if velocityChange > Config.ImpactLimpSpeed then
+			rigState.limpUntil = math.max(rigState.limpUntil or 0, now + Config.ImpactLimpTime)
+		end
 		if rigState.stateTime >= rigState.knockDuration then
 			rigState.state = "Recovering"
 			rigState.stateTime = 0
@@ -74,12 +125,8 @@ function Knockdown.update(rigState, dt: number, now: number)
 	end
 	-- A smaller hit makes you stumble: weaker balance and catch-steps in the
 	-- direction you were shoved.
-	if Config.EuphoriaEnabled and velocityChange > Config.StaggerSpeed and rigState.state == "Active" then
-		local flat = Vector3.new(velocity.X, 0, velocity.Z)
-		rigState.state = "Stagger"
-		rigState.stateTime = 0
-		rigState.teeterManual = false
-		rigState.teeterDrift = if flat.Magnitude > 0.1 then flat.Unit * math.rad(Config.StaggerTilt) else Vector3.zero
+	if velocityChange > Config.StaggerSpeed and rigState.state == "Active" then
+		Knockdown.stagger(rigState, velocity, math.rad(Config.StaggerTilt))
 	end
 
 	local upright = rigState.core.CFrame.UpVector.Y

@@ -33,12 +33,14 @@ local function armFrame(core: BasePart, aim: Vector3): CFrame
 end
 
 local function setArmReach(arm, frame: CFrame?, torque: number)
-	for _, align in { arm.upper, arm.lower } do
+	-- Each arm part gets the frame in its own joint orientation (see Rig).
+	for _, pair in { { arm.upper, arm.upperOffset }, { arm.lower, arm.lowerOffset } } do
+		local align = pair[1]
 		if align then
 			align.Enabled = frame ~= nil
 			align.MaxTorque = torque
 			if frame then
-				align.CFrame = frame
+				align.CFrame = frame * (pair[2] or CFrame.identity)
 			end
 		end
 	end
@@ -54,7 +56,7 @@ local function chooseReaction(rigState, velocity: Vector3, grounded: boolean, re
 		)
 		if not nearGround and velocity.Y < -Config.FallPanicSpeed * 0.5 then
 			return "Flail"
-		elseif velocity.Magnitude > Config.EuphoriaBraceSpeed then
+		elseif not nearGround and velocity.Magnitude > Config.EuphoriaBraceSpeed then
 			return "Brace"
 		end
 		return "Writhe"
@@ -78,18 +80,37 @@ function Reactions.apply(rigState, dt: number, velocity: Vector3, grounded: bool
 	-- The player keeps their arms while stumbling or getting up if they're reaching.
 	local armsFree = rigState.state == "Knocked" or not reaching
 
-	if not mode then
-		for _, drive in rigState.elbowDrives do
-			if drive then
-				drive.align.Enabled = false
-			end
+	-- Right after a hit every muscle lets go: the body drops like dead weight
+	-- for a moment before the protective reflexes take over.
+	if rigState.state == "Knocked" and os.clock() < (rigState.limpUntil or 0) then
+		rigState.reactionMode = "Limp"
+		for side, arm in rigState.arms do
+			setArmReach(arm, nil, 0)
+			poseDrive(rigState.armSwingDrives[side], 0, 0, 0)
+			poseDrive(rigState.elbowDrives[side], 0, 0, 0)
 		end
+		for _, drive in legs do
+			poseDrive(drive, 0, 0, 0)
+		end
+		poseDrive(rigState.headDrive, 0, 0, 0)
+		return
+	end
+
+	if not mode then
+		-- The controller owns the elbows here (it holds the forearm to the upper arm).
+		-- armPower drops when a lift is too heavy (see Controller).
+		-- An empty hand only needs enough muscle to hold the arm up. The full
+		-- strength is saved for when the hand is gripping something, so a
+		-- raised arm can never shove the body around.
+		local gripTorque = Config.ArmMaxTorque * (rigState.armPower or 1)
 		for _, arm in rigState.arms do
+			local gripping = arm.hand:FindFirstChild(Shared.GRIP_NAME) ~= nil
+			local armTorque = if gripping then gripTorque else math.min(Config.ArmFreeTorque, gripTorque)
 			if arm.upper then
-				arm.upper.MaxTorque = Config.ArmMaxTorque
+				arm.upper.MaxTorque = armTorque
 			end
 			if arm.lower then
-				arm.lower.MaxTorque = Config.ArmMaxTorque
+				arm.lower.MaxTorque = armTorque
 			end
 		end
 		return
@@ -126,20 +147,16 @@ function Reactions.apply(rigState, dt: number, velocity: Vector3, grounded: bool
 		poseDrive(legs.RightKnee, -0.8, 0, Config.EuphoriaFlailTorque)
 		poseDrive(rigState.headDrive, 0.6, 0, Config.HeadMaxTorque * 2)
 	elseif mode == "Writhe" then
-		-- Weak, slow squirming on the ground (dazed).
-		local torque = Config.EuphoriaWritheTorque
-		local speed = 0.9
+		-- Already on the ground: stay limp instead of thrashing and spinning.
 		for side, arm in rigState.arms do
 			setArmReach(arm, nil, 0)
-			local seed = if side == "Left" then 1 else 2
-			poseDrive(rigState.armSwingDrives[side], noise(t * speed, seed) * 1.4, outward(side) * (0.4 + 0.4 * noise(t * speed, seed + 10)), torque)
-			poseDrive(rigState.elbowDrives[side], 0.5 + 0.6 * noise(t * speed, seed + 20), 0, torque)
+			poseDrive(rigState.armSwingDrives[side], 0, 0, 0)
+			poseDrive(rigState.elbowDrives[side], 0, 0, 0)
 		end
-		poseDrive(legs.LeftHip, 0.3 + noise(t * speed, 3) * 0.8, -0.1, torque)
-		poseDrive(legs.RightHip, 0.3 + noise(t * speed, 4) * 0.8, 0.1, torque)
-		poseDrive(legs.LeftKnee, -0.6 + noise(t * speed, 5) * 0.6, 0, torque)
-		poseDrive(legs.RightKnee, -0.6 + noise(t * speed, 6) * 0.6, 0, torque)
-		poseDrive(rigState.headDrive, noise(t * 0.5, 7) * 0.5, noise(t * 0.5, 8) * 0.4, Config.HeadMaxTorque)
+		for _, drive in legs do
+			poseDrive(drive, 0, 0, 0)
+		end
+		poseDrive(rigState.headDrive, 0, 0, 0)
 	elseif mode == "PushUp" then
 		-- Hands to the floor, knees tucked, then the balance ramp stands you up.
 		local aim = (Vector3.new(0, -1, 0) + core.CFrame.LookVector * 0.4).Unit
@@ -171,6 +188,8 @@ function Reactions.apply(rigState, dt: number, velocity: Vector3, grounded: bool
 				poseDrive(rigState.elbowDrives[side], 0.4, 0, Config.EuphoriaFlailTorque)
 			end
 		end
+		-- Eyes on the ground ahead, looking for footing.
+		poseDrive(rigState.headDrive, 0.35 * panic, 0, Config.HeadMaxTorque)
 	end
 end
 

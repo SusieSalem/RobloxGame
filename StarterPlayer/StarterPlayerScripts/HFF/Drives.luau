@@ -41,7 +41,8 @@ function Drives.set(drive, angle: number, strength: number, enabled: boolean)
 	end
 	drive.align.Enabled = enabled and strength > 0
 	drive.align.MaxTorque = drive.maxTorque * strength
-	drive.target.CFrame = drive.base * CFrame.Angles(0, angle, 0)
+	drive.rot = CFrame.Angles(0, angle, 0)
+	drive.target.CFrame = drive.base * drive.rot
 end
 
 -- Like setDrive, but with a sideways angle too and an explicit torque. Used by
@@ -53,7 +54,8 @@ function Drives.pose(drive, forward: number, side: number, torque: number)
 	end
 	drive.align.Enabled = torque > 0
 	drive.align.MaxTorque = torque
-	drive.target.CFrame = drive.base * CFrame.Angles(0, forward, side)
+	drive.rot = CFrame.Angles(0, forward, side)
+	drive.target.CFrame = drive.base * drive.rot
 end
 
 -- Arms aim in world space, so they use one-attachment AlignOrientations.

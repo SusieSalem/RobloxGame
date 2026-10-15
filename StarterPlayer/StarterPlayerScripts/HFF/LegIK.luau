@@ -55,8 +55,13 @@ function LegIK.update(rigState, dt: number, flatVelocity: Vector3, strength: num
 	-- Feet want to be under the upper torso (which moves with any tilt), a
 	-- little ahead in the direction of travel.
 	local center = rigState.core.Position + flatVelocity * Config.StepLead
+	-- While walking the feet keep a steady left-right rhythm like the normal
+	-- walk animation: as soon as one foot lands, the other one goes.
+	local walking = flatVelocity.Magnitude > Config.GaitMinSpeed
+	local threshold = if walking then Config.GaitStepDistance else Config.StepDistance
 	local anyStepping = false
-	local worst, worstDistance = nil, Config.StepDistance
+	local worst, worstDistance = nil, threshold
+	local nextLeg, nextDistance = nil, 0
 	for _, leg in legs do
 		anyStepping = anyStepping or leg.stepping
 		local spot = center + right * (leg.sideSign * leg.spacing)
@@ -68,7 +73,13 @@ function LegIK.update(rigState, dt: number, flatVelocity: Vector3, strength: num
 			if distance > worstDistance then
 				worst, worstDistance = leg, distance
 			end
+			if leg.side ~= rigState.lastStepSide then
+				nextLeg, nextDistance = leg, distance
+			end
 		end
+	end
+	if walking and nextLeg and nextDistance > threshold then
+		worst = nextLeg
 	end
 
 	-- One foot at a time, the one furthest behind.
@@ -79,6 +90,8 @@ function LegIK.update(rigState, dt: number, flatVelocity: Vector3, strength: num
 		worst.to = worst.spot
 		worst.t = 0
 		worst.duration = Config.StepDuration * (1 - 0.4 * speedAlpha)
+		worst.height = Config.StepHeight * (0.6 + 0.6 * speedAlpha)
+		rigState.lastStepSide = worst.side
 	end
 
 	local landed = 0
@@ -91,7 +104,11 @@ function LegIK.update(rigState, dt: number, flatVelocity: Vector3, strength: num
 				leg.to = leg.to:Lerp(leg.spot, 0.25) -- follow the body a bit mid-step
 			end
 			leg.t = math.min(leg.t + dt / leg.duration, 1)
-			target = leg.from:Lerp(leg.to, leg.t) + Vector3.new(0, math.sin(leg.t * math.pi) * Config.StepHeight, 0)
+			-- Swing arc: the foot lifts quickly off the toe, then reaches forward
+			-- and comes down onto the heel, like the walk animation.
+			local lift = math.sin(math.min(leg.t * 1.25, 1) * math.pi) * (leg.height or Config.StepHeight)
+			local reach = 1 - (1 - leg.t) ^ 2
+			target = leg.from:Lerp(leg.to, reach) + Vector3.new(0, lift, 0)
 			if leg.t >= 1 then
 				leg.stepping = false
 				leg.planted = leg.to

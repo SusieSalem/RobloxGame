@@ -30,6 +30,7 @@ Synced with Rojo (`default.project.json`, port 34872). Each folder is the Roblox
 | `Reactions` | Euphoria reactions (flail, brace, writhe, push-up) |
 | `Grab` | Hand contact detection and grip requests |
 | `Camera` | Smoothed camera follow and mouse lock |
+| `RemoteSmoothing` | Smooth local copy of every other player's body (see `RemoteSmoothing*` in the config) |
 
 ### HUD modules (`UI/`)
 
@@ -81,6 +82,9 @@ Synced with Rojo (`default.project.json`, port 34872). Each folder is the Roblox
   stay loose. Legs swing in a procedural stride driven by AlignOrientations on the hips and knees.
 - **Walking**: a VectorForce chases the target velocity with capped acceleration, so you accelerate
   and stop with a bit of slide. Reduced control in the air or while hanging.
+- **Arms**: one loose piece hanging from the shoulder. A soft shoulder muscle pulls the arm straight
+  down and swings it while walking; a firmer elbow keeps the forearm in line with the upper arm.
+  Arms don't collide with your own torso or thighs, so they hang straight.
 - **Grabbing**: the client detects hand contact and asks the server; the server validates distance
   and creates a BallSocketConstraint between hand and object, so every player sees the grip. Loose
   props become owned by the grabber so carrying has no lag. Grips break when stretched.
@@ -89,6 +93,10 @@ Synced with Rojo (`default.project.json`, port 34872). Each folder is the Roblox
   can knock someone down with `ReplicatedStorage.HFFRemotes.ServerKnockdown:Fire(player, seconds)`.
 - **Limb colliders**: the Humanoid forces arm/leg collisions off, so each limb has an invisible welded `HFFCollider` part that collides instead.
 - **Network ownership** of the body stays on the owning client for responsiveness.
+- **Other players**: each client hides the replicated ragdoll of every other player and shows a
+  local anchored copy that eases toward it, with limbs rebuilt from their joints so they never
+  pull apart. Collisions and grabs still use the real replicated body. `RemoteSmoothing = false`
+  turns it off.
 - Set `Config.Debug = true` to print grounded/height/force in the client output once a second.
 - Parts with the attribute `HFFNoGrab = true` cannot be grabbed.
 
@@ -99,6 +107,12 @@ Synced with Rojo (`default.project.json`, port 34872). Each folder is the Roblox
 - Floating above the ground / feet sinking: adjust `StandHeightScale` (e.g. 0.95 or 1.05).
 - Bouncy standing: raise `HoverDamping`; sluggish: raise `HoverStiffness`.
 - Climbing too hard: raise `ArmMaxTorque`.
+- Arms on the ground are free pendulums (no shoulder muscle). If they lean into the torso at rest,
+  check `CenterShoulderPivot`. Arms lifting when falling: `ArmAirDrag`. Swing while walking:
+  `ArmSwingPump`.
+- Forearm too floppy or too rigid against the upper arm: `ArmElbowTorque`, and the elbow range in
+  `JointLimits.LeftElbow` / `RightElbow`.
+- Shoulder range of motion: `JointLimits.LeftShoulder` / `RightShoulder`.
 - Leg swing going the wrong way on a custom rig: flip the sign of `StrideAngle`.
 
 ## Known rough edges

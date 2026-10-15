@@ -18,6 +18,7 @@ for _, old in { game:GetService("ServerScriptService"):FindFirstChild("HFFCharac
 end
 
 local GRIP_NAME = "HFFGrip"
+local CARRY_LIFT_NAME = "HFFCarryLift"
 local SIDES = { Left = true, Right = true }
 
 ---------------------------------------------------------------------------
@@ -66,6 +67,17 @@ local EXTRA_NO_COLLIDE = {
 	{ "Head", "LeftUpperArm" },
 	{ "Head", "RightUpperArm" },
 }
+-- Arms must hang straight down, so they pass through the character's own
+-- torso and thighs instead of resting on them (which props the elbows out and
+-- holds the upper arm still). The HumanoidRootPart is as wide as the torso and
+-- the Humanoid can turn its collisions back on, so it is included.
+for _, side in { "Left", "Right" } do
+	for _, armPart in { side .. "UpperArm", side .. "LowerArm", side .. "Hand" } do
+		for _, bodyPart in { "HumanoidRootPart", "UpperTorso", "LowerTorso", "LeftUpperLeg", "RightUpperLeg" } do
+			table.insert(EXTRA_NO_COLLIDE, { armPart, bodyPart })
+		end
+	end
+end
 
 local COLLIDER_NAME = "HFFCollider"
 
@@ -192,20 +204,41 @@ local function buildJoint(character: Model, name: string, parts: { string }): bo
 
 	local a0 = Instance.new("Attachment")
 	a0.Name = "HFFA0_" .. name
-	a0.CFrame = rig0.CFrame * axis
+	-- The R15 shoulder pivot is on the inner edge of the upper arm, so a limp
+	-- arm leans into the torso until its weight is under the pivot. Sliding the
+	-- pivot sideways to above the middle of the arm (same shift on both parts,
+	-- so the rest pose is unchanged) makes it hang straight down.
+	local pivotShift = Vector3.zero
+	if Config.CenterShoulderPivot and name:find("Shoulder") then
+		pivotShift = Vector3.new(-rig1.Position.X, 0, -rig1.Position.Z)
+	end
+	-- pivotShift is in the arm's space. Some avatar bodies turn their rig
+	-- attachments, so the same shift in the torso's space has to be turned to
+	-- match, or the two halves of the joint start apart and pull on each other.
+	local torsoShift = (rig0.CFrame.Rotation * rig1.CFrame.Rotation:Inverse()) * pivotShift
+
+	a0.CFrame = (rig0.CFrame + torsoShift) * axis
 	a0.Parent = part0
 
 	local a1 = Instance.new("Attachment")
 	a1.Name = "HFFA1_" .. name
-	a1.CFrame = rig1.CFrame * axis
+	a1.CFrame = (rig1.CFrame + pivotShift) * axis
 	a1.Parent = part1
 
 	local socket = Instance.new("BallSocketConstraint")
 	socket.Name = "HFFSocket_" .. name
 	socket.Attachment0 = a0
 	socket.Attachment1 = a1
-	socket.LimitsEnabled = true
-	socket.TwistLimitsEnabled = true
+	-- Free shoulders: the arms are aimed in world space by a strong motor, and
+	-- any limit it pressed against shoved the whole torso around. With the arms
+	-- raised, a few degrees of body tilt were enough to hit the twist limit.
+	local free = Config.FreeShoulders and name:find("Shoulder") ~= nil
+	socket.LimitsEnabled = not free
+	-- Elbows keep their bend limit but not the tight twist limit: the upper and
+	-- lower arm are aimed separately, and a few degrees of difference pressed the
+	-- forearm against it while the arm was raised.
+	local freeTwist = free or (Config.FreeElbowTwist and name:find("Elbow") ~= nil)
+	socket.TwistLimitsEnabled = not freeTwist
 	socket.UpperAngle = limits.UpperAngle
 	socket.TwistLowerAngle = limits.TwistLower
 	socket.TwistUpperAngle = limits.TwistUpper
@@ -298,6 +331,50 @@ local function setupCharacter(player: Player, character: Model)
 			noCollide(a, b)
 		end
 	end
+	-- No collisions between the character's own body parts at all (other
+	-- players and the world still collide). Applies on spawn.
+	if Config.NoSelfCollision then
+		local bodyParts = {}
+		for _, part in character:GetChildren() do
+			if part:IsA("BasePart") and part ~= root then
+				table.insert(bodyParts, part)
+			end
+		end
+		for i = 1, #bodyParts do
+			for j = i + 1, #bodyParts do
+				noCollide(bodyParts[i], bodyParts[j])
+			end
+		end
+	end
+
+	-- Accessories (hats, hair, bags, shoulder pets, wings) must not affect the
+	-- physics at all. They don't collide (a raised arm would bump them), and
+	-- they weigh nothing: a heavy accessory welded to an arm or the head drags
+	-- the arm down and leans the body, which a plain avatar doesn't do.
+	local function neutralizeAccessoryPart(item: Instance)
+		if item:IsA("BasePart") and item:FindFirstAncestorWhichIsA("Accoutrement") then
+			item.CanCollide = false
+			item.CanTouch = false
+			item.Massless = true
+		end
+	end
+	for _, item in character:GetDescendants() do
+		neutralizeAccessoryPart(item)
+	end
+	-- Accessories can load or be added after spawn.
+	character.DescendantAdded:Connect(neutralizeAccessoryPart)
+
+	-- Cartoon outline around the whole character. Occluded = hidden behind walls.
+	if Config.PlayerOutline and not character:FindFirstChild("HFFOutline") then
+		local outline = Instance.new("Highlight")
+		outline.Name = "HFFOutline"
+		outline.DepthMode = Enum.HighlightDepthMode.Occluded
+		outline.OutlineColor = Config.PlayerOutlineColor
+		outline.OutlineTransparency = 0
+		outline.FillColor = Config.PlayerOutlineColor
+		outline.FillTransparency = Config.PlayerOutlineFillTransparency
+		outline.Parent = character
+	end
 
 	giveOwnership(player, character)
 	character:SetAttribute("HFFReady", true)
@@ -353,6 +430,13 @@ local function release(player: Player, side: string)
 	local root = grip.ownedRoot
 	if root and root.Parent and not isGripped(root) then
 		pcall(root.SetNetworkOwnershipAuto, root)
+		-- Nobody holds it any more: it gets its full weight back.
+		for _, name in { CARRY_LIFT_NAME, CARRY_LIFT_NAME .. "Attachment" } do
+			local lift = root:FindFirstChild(name)
+			if lift then
+				lift:Destroy()
+			end
+		end
 	end
 end
 
@@ -412,6 +496,24 @@ local function grab(player: Player, side: string, target: BasePart, point: Vecto
 		end
 	end
 
+	-- Carry strength: a held prop is partly lifted by an upward force, so it
+	-- weighs only CarryWeightScale of its real weight while someone holds it.
+	-- (It keeps its full mass, so it still feels heavy to swing around.) One
+	-- force per prop, however many hands are on it.
+	if ownedRoot and Config.CarryWeightScale < 1 and not ownedRoot:FindFirstChild(CARRY_LIFT_NAME) then
+		local liftAttachment = Instance.new("Attachment")
+		liftAttachment.Name = CARRY_LIFT_NAME .. "Attachment"
+		liftAttachment.Parent = ownedRoot
+
+		local lift = Instance.new("VectorForce")
+		lift.Name = CARRY_LIFT_NAME
+		lift.Attachment0 = liftAttachment
+		lift.RelativeTo = Enum.ActuatorRelativeTo.World
+		lift.ApplyAtCenterOfMass = true
+		lift.Force = Vector3.new(0, ownedRoot.AssemblyMass * workspace.Gravity * (1 - Config.CarryWeightScale), 0)
+		lift.Parent = ownedRoot
+	end
+
 	grips[player] = grips[player] or {}
 	grips[player][side] = {
 		constraint = constraint,
@@ -468,8 +570,40 @@ local function onPlayer(player: Player)
 		releaseAll(player)
 		local humanoid = character:WaitForChild("Humanoid", 10) :: Humanoid?
 		if humanoid then
-			humanoid.Died:Connect(function()
+			-- The ragdoll has no neck joint and the client keeps the Humanoid in
+			-- the Physics state, so Roblox's own death and respawn can fail to
+			-- trigger. Handle both here: any way of dying brings the player back.
+			local respawning = false
+			local function respawnLater()
+				if respawning then
+					return
+				end
+				respawning = true
 				releaseAll(player)
+				task.delay(Players.RespawnTime + 0.5, function()
+					if player.Parent and player.Character == character then
+						player:LoadCharacter()
+					end
+				end)
+			end
+			humanoid.Died:Connect(respawnLater)
+			humanoid.HealthChanged:Connect(function(health)
+				if health <= 0 then
+					respawnLater()
+				end
+			end)
+			-- Falling into the void destroys the body parts without killing.
+			task.spawn(function()
+				local root = character:WaitForChild("HumanoidRootPart", 10)
+				if not root then
+					return
+				end
+				root.AncestryChanged:Connect(function()
+					if not root:IsDescendantOf(character) or not character:IsDescendantOf(workspace) then
+						humanoid.Health = 0
+						respawnLater()
+					end
+				end)
 			end)
 		end
 		setupCharacter(player, character)

@@ -13,6 +13,9 @@ local makeDrive = Drives.make
 local makeArmAlign = Drives.makeArmAlign
 local yawFromDirection = Util.yawFromDirection
 
+-- Same as the server's joint frames: X along the limb.
+local LIMB_AXIS = CFrame.Angles(0, 0, -math.pi / 2)
+
 local Rig = {}
 
 local function waitForReady(character: Model): boolean
@@ -71,6 +74,7 @@ function Rig.build(character: Model)
 		standHeight = (humanoid.HipHeight + root.Size.Y / 2) * Config.StandHeightScale,
 		facingYaw = yawFromDirection(root.CFrame.LookVector),
 		stepPhase = 0,
+		armPhase = 0,
 		lastGroundedTime = 0,
 		lastJumpTime = 0,
 		lastVelocity = Vector3.zero,
@@ -85,6 +89,22 @@ function Rig.build(character: Model)
 		teeterDrift = Vector3.zero, -- how far (radians) and which way the body is tipping while staggering
 		teeterManual = false,
 	}
+
+	-- Accessories (hats, hair, pets, old-style Hat objects too) must never
+	-- collide or weigh anything. The server sets this as well; doing it here
+	-- too means it holds on this client, which simulates the body, even if an
+	-- accessory loads late or the server's change hasn't arrived yet.
+	local function neutralizeAccessoryPart(item: Instance)
+		if item:IsA("BasePart") and item:FindFirstAncestorWhichIsA("Accoutrement") then
+			item.CanCollide = false
+			item.CanTouch = false
+			item.Massless = true
+		end
+	end
+	for _, item in character:GetDescendants() do
+		neutralizeAccessoryPart(item)
+	end
+	table.insert(rigState.connections, character.DescendantAdded:Connect(neutralizeAccessoryPart))
 
 	for _, part in character:GetChildren() do
 		if part:IsA("BasePart") and part ~= root then
@@ -101,7 +121,7 @@ function Rig.build(character: Model)
 		if socket:IsA("BallSocketConstraint") and socket.Name:sub(1, 10) == "HFFSocket_" then
 			local a0, a1 = socket.Attachment0, socket.Attachment1
 			if a0 and a1 and a0.Parent and a1.Parent then
-				rigState.joints[socket.Name:sub(11)] = { part0 = a0.Parent, part1 = a1.Parent, a0 = a0, a1 = a1 }
+				rigState.joints[socket.Name:sub(11)] = { part0 = a0.Parent, part1 = a1.Parent, a0 = a0, a1 = a1, socket = socket }
 				jointCount += 1
 			end
 		end
@@ -146,17 +166,20 @@ function Rig.build(character: Model)
 	}
 	rigState.headDrive = makeDrive(rigState, "Neck", Config.HeadMaxTorque, Config.HeadResponsiveness)
 	rigState.elbowDrives = {
-		Left = makeDrive(rigState, "LeftElbow", Config.EuphoriaFlailTorque, Config.LegResponsiveness),
-		Right = makeDrive(rigState, "RightElbow", Config.EuphoriaFlailTorque, Config.LegResponsiveness),
+		Left = makeDrive(rigState, "LeftElbow", Config.EuphoriaFlailTorque, Config.ArmElbowResponsiveness),
+		Right = makeDrive(rigState, "RightElbow", Config.EuphoriaFlailTorque, Config.ArmElbowResponsiveness),
 	}
 	for _, drive in rigState.elbowDrives do
 		drive.align.Enabled = false
 	end
-	-- Shoulders swing opposite the legs while walking (when not reaching).
+	-- Shoulder drives: normally off (arms hang freely), only the reactions use them.
 	rigState.armSwingDrives = {
-		Left = makeDrive(rigState, "LeftShoulder", Config.ArmSwingMaxTorque, Config.LegResponsiveness),
-		Right = makeDrive(rigState, "RightShoulder", Config.ArmSwingMaxTorque, Config.LegResponsiveness),
+		Left = makeDrive(rigState, "LeftShoulder", Config.EuphoriaFlailTorque, Config.ArmSwingResponsiveness),
+		Right = makeDrive(rigState, "RightShoulder", Config.EuphoriaFlailTorque, Config.ArmSwingResponsiveness),
 	}
+	for _, drive in rigState.armSwingDrives do
+		drive.align.Enabled = false
+	end
 
 	-- Leg IK data: segment lengths and where each foot is planted.
 	rigState.ikLegs = {}
@@ -196,9 +219,84 @@ function Rig.build(character: Model)
 	for _, side in { "Left", "Right" } do
 		local hand = character:FindFirstChild(side .. "Hand")
 		if hand then
+			-- Arm weight and length, for the floppy-arm forces below.
+			local mass, length = 0, 0
+			local armParts = {}
+			for _, name in { side .. "UpperArm", side .. "LowerArm", side .. "Hand" } do
+				local part = character:FindFirstChild(name)
+				if part and part:IsA("BasePart") then
+					mass += part:GetMass()
+					length += part.Size.Y
+					-- Normal and "raised" weight, see the arm loop in Controller.
+					local normal = part.CurrentPhysicalProperties
+					table.insert(armParts, {
+						part = part,
+						normal = normal,
+						light = PhysicalProperties.new(
+							normal.Density * Config.RaisedArmWeight,
+							normal.Friction,
+							normal.Elasticity,
+							normal.FrictionWeight,
+							normal.ElasticityWeight
+						),
+					})
+				end
+			end
+
+			-- Air drag pulls on the hand, so the limp arm trails behind the body:
+			-- it lifts while you fall and streams back when you move fast.
+			local dragAttachment = Instance.new("Attachment")
+			dragAttachment.Name = "HFFArmDrag"
+			dragAttachment.Parent = hand
+			table.insert(rigState.instances, dragAttachment)
+			local drag = Instance.new("VectorForce")
+			drag.Name = "HFFArmDrag"
+			drag.Attachment0 = dragAttachment
+			drag.RelativeTo = Enum.ActuatorRelativeTo.World
+			drag.Force = Vector3.zero
+			drag.Parent = hand
+			table.insert(rigState.instances, drag)
+
+			local elbow = rigState.joints[side .. "Elbow"]
+
+			-- Avatar bodies don't all orient their joint frames (rig attachments)
+			-- like the plain blocky rig. The reach aim has to be put into each
+			-- arm part's own frame, or the upper and lower arm are aimed at two
+			-- slightly different poses and fight each other through the elbow.
+			-- Both offsets are "no change" on a plain rig.
+			local shoulderJoint = rigState.joints[side .. "Shoulder"]
+			local upperOffset, lowerOffset = CFrame.identity, CFrame.identity
+			if shoulderJoint then
+				upperOffset = LIMB_AXIS:Inverse() * shoulderJoint.a0.CFrame.Rotation
+				if elbow then
+					lowerOffset = upperOffset * shoulderJoint.a1.CFrame.Rotation:Inverse() * elbow.a0.CFrame.Rotation
+				end
+				local _, upperAngle = upperOffset:ToAxisAngle()
+				local _, lowerAngle = lowerOffset:ToAxisAngle()
+				print(string.format(
+					"[HFF] %s arm frames: shoulder turned %.0f°, forearm turned %.0f° (0 on a plain rig)",
+					side,
+					math.deg(upperAngle),
+					math.deg(lowerAngle)
+				))
+			end
+
 			rigState.arms[side] = {
 				side = side,
+				elbowJoint = elbow,
+				-- How the forearm's joint frame is turned relative to the upper arm's (none in a normal rig).
+				elbowRest = if elbow
+					then elbow.a0.CFrame.Rotation:Inverse() * elbow.a1.CFrame.Rotation
+					else CFrame.identity,
 				hand = hand,
+				mass = mass,
+				length = length,
+				parts = armParts,
+				light = false,
+				drag = drag,
+				shoulderPivot = if rigState.joints[side .. "Shoulder"] then rigState.joints[side .. "Shoulder"].a1 else nil,
+				upperOffset = upperOffset,
+				lowerOffset = lowerOffset,
 				upper = makeArmAlign(rigState, side .. "Shoulder"),
 				lower = makeArmAlign(rigState, side .. "Elbow"),
 				nextGrabTime = 0,
@@ -227,6 +325,9 @@ function Rig.build(character: Model)
 			if instance:IsA("AlignOrientation") then
 				instance.Enabled = false
 			end
+		end
+		for _, arm in rigState.arms do
+			arm.drag.Force = Vector3.zero
 		end
 	end))
 

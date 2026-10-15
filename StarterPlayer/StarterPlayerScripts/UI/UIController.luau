@@ -1,5 +1,5 @@
 -- UIController
--- Builds the HUD: status badge, control hints, settings and touch buttons.
+-- Builds the HUD: status badge, control hints, settings, update log and touch buttons.
 
 local RunService = game:GetService("RunService")
 
@@ -8,6 +8,7 @@ local Responsive = require(script.Parent.Responsive)
 local StatusBadge = require(script.Parent.StatusBadge)
 local ControlHints = require(script.Parent.ControlHints)
 local SettingsMenu = require(script.Parent.SettingsMenu)
+local UpdateLog = require(script.Parent.UpdateLog)
 local TouchControls = require(script.Parent.TouchControls)
 
 local HFF = script.Parent.Parent:WaitForChild("HFF")
@@ -32,6 +33,7 @@ function UIController.start(onRagdoll: () -> ())
 	local updateStatus = StatusBadge.mount(hud)
 	ControlHints.mount(hud)
 	SettingsMenu.mount(hud)
+	UpdateLog.mount(hud)
 	TouchControls.mount(playerGui, onRagdoll)
 
 	RunService.RenderStepped:Connect(function()

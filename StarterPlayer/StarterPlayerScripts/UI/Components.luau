@@ -34,8 +34,19 @@ function Components.stroke()
 	return create("UIStroke", {
 		Color = Theme.Colors.Stroke,
 		Transparency = Theme.StrokeTransparency,
-		Thickness = 1,
+		Thickness = Theme.StrokeThickness,
+		LineJoinMode = Enum.LineJoinMode.Round,
 		ApplyStrokeMode = Enum.ApplyStrokeMode.Border,
+	})
+end
+
+-- Black outline around the text itself (not the box).
+function Components.textStroke(thickness: number?)
+	return create("UIStroke", {
+		Color = Theme.Colors.Stroke,
+		Thickness = thickness or Theme.TextStrokeThickness,
+		LineJoinMode = Enum.LineJoinMode.Round,
+		ApplyStrokeMode = Enum.ApplyStrokeMode.Contextual,
 	})
 end
 
@@ -85,7 +96,7 @@ function Components.label(text: string, props: { [string]: any }?)
 		AutomaticSize = Enum.AutomaticSize.XY,
 		Size = UDim2.new(),
 		TextXAlignment = Enum.TextXAlignment.Left,
-	})
+	}, { Components.textStroke() })
 	for key, value in props or {} do
 		label[key] = value
 	end
@@ -99,14 +110,17 @@ function Components.keyCap(text: string)
 		Text = text,
 		FontFace = Theme.Font,
 		TextSize = Theme.SmallTextSize,
-		TextColor3 = Theme.Colors.Text,
+		TextColor3 = Theme.Colors.KeyCapText,
 		AutomaticSize = Enum.AutomaticSize.X,
-		Size = UDim2.fromOffset(24, 24),
+		Size = UDim2.fromOffset(28, 28),
 	}, {
-		Components.corner(UDim.new(0, 6)),
-		create("UIPadding", { PaddingLeft = UDim.new(0, 6), PaddingRight = UDim.new(0, 6) }),
-		create("UISizeConstraint", { MinSize = Vector2.new(24, 24) }),
+		Components.corner(UDim.new(0, 8)),
+		create("UIPadding", { PaddingLeft = UDim.new(0, 7), PaddingRight = UDim.new(0, 7) }),
+		create("UISizeConstraint", { MinSize = Vector2.new(28, 28) }),
 	})
+	local border = Components.stroke()
+	border.Thickness = 2
+	border.Parent = cap
 	return cap
 end
 
@@ -125,12 +139,18 @@ function Components.switchRow(text: string, initial: boolean, onChanged: (boolea
 		AnchorPoint = Vector2.new(0, 0.5),
 		BackgroundColor3 = Theme.Colors.Text,
 	}, { Components.corner(UDim.new(1, 0)) })
+	local knobStroke = Components.stroke()
+	knobStroke.Thickness = 2
+	knobStroke.Parent = knob
 
 	local track = create("Frame", {
 		Size = UDim2.fromOffset(42, 24),
 		BackgroundColor3 = Theme.Colors.SwitchOff,
 		LayoutOrder = 2,
 	}, { Components.corner(UDim.new(1, 0)), knob })
+	local trackStroke = Components.stroke()
+	trackStroke.Thickness = 2
+	trackStroke.Parent = track
 
 	local row = create("TextButton", {
 		Text = "",

@@ -3,6 +3,12 @@
   "servePort": 34872,
   "tree": {
     "$className": "DataModel",
+    "ServerStorage": {
+      "$className": "ServerStorage",
+      "README": {
+        "$path": "ServerStorage/README.txt"
+      }
+    },
     "ReplicatedStorage": {
       "$className": "ReplicatedStorage",
       "$path": "ReplicatedStorage"

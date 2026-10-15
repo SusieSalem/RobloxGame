@@ -19,6 +19,7 @@ local Rig = require(HFF:WaitForChild("Rig"))
 local Controller = require(HFF:WaitForChild("Controller"))
 local Knockdown = require(HFF:WaitForChild("Knockdown"))
 local Camera = require(HFF:WaitForChild("Camera"))
+local RemoteSmoothing = require(HFF:WaitForChild("RemoteSmoothing"))
 local UIController = require(UI:WaitForChild("UIController"))
 
 local State = Shared.State
@@ -46,10 +47,11 @@ local function onCharacterAdded(character: Model)
 	end
 end
 
-print("[HFF] Client running")
+print(string.format("[HFF] Client running (config version %s)", tostring(Shared.Config.Version)))
 
 Input.start(toggleRagdoll)
 Camera.start()
+RemoteSmoothing.start()
 UIController.start(toggleRagdoll)
 
 Shared.Remotes.Knockdown.OnClientEvent:Connect(function(duration: number?)
